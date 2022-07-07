@@ -1,3 +1,7 @@
 # stat153-finalproject
+
 ## Time Series Evaluation of Synthetic Stock Price Data
-### Contributor: Noah Kaminer
+
+### UC Berkeley Data 102 Final Project - Fall 2021
+
+#### Contributor: Noah Kaminer
