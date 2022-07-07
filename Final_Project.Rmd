@@ -1,0 +1,533 @@
+---
+title: "Stat 153 Final Project"
+author: "Noah Kaminer"
+date: "5/6/2021"
+output: 
+        bookdown::pdf_document2: 
+                toc: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r include=FALSE,results='hide'}
+library(astsa)
+library(forecast)
+library(knitr)
+library(tidyverse)
+```
+
+```{r}
+sarima_wPACF = function (xdata, p, d, q, P = 0, D = 0, Q = 0, S = -1, details = TRUE, 
+          xreg = NULL, Model = TRUE, fixed = NULL, tol = sqrt(.Machine$double.eps), 
+          no.constant = FALSE, max.lag = -1) 
+{
+  layout = graphics::layout
+  par = graphics::par
+  plot = graphics::plot
+  grid = graphics::grid
+  title = graphics::title
+  polygon = graphics::polygon
+  abline = graphics::abline
+  lines = graphics::lines
+  frequency = stats::frequency
+  coef = stats::coef
+  dnorm = stats::dnorm
+  ppoints = stats::ppoints
+  qnorm = stats::qnorm
+  time = stats::time
+  na.pass = stats::na.pass
+  trans = ifelse(is.null(fixed), TRUE, FALSE)
+  trc = ifelse(details, 1, 0)
+  n = length(xdata)
+  if (is.null(xreg)) {
+    constant = 1:n
+    xmean = rep(1, n)
+    if (no.constant == TRUE) 
+      xmean = NULL
+    if (d == 0 & D == 0) {
+      fitit = stats::arima(xdata, order = c(p, d, q), seasonal = list(order = c(P, 
+                                                                                D, Q), period = S), xreg = xmean, include.mean = FALSE, 
+                           fixed = fixed, trans = trans, optim.control = list(trace = trc, 
+                                                                              REPORT = 1, reltol = tol))
+    }
+    else if (xor(d == 1, D == 1) & no.constant == FALSE) {
+      fitit = stats::arima(xdata, order = c(p, d, q), seasonal = list(order = c(P, 
+                                                                                D, Q), period = S), xreg = constant, fixed = fixed, 
+                           trans = trans, optim.control = list(trace = trc, 
+                                                               REPORT = 1, reltol = tol))
+    }
+    else fitit = stats::arima(xdata, order = c(p, d, q), 
+                              seasonal = list(order = c(P, D, Q), period = S), 
+                              include.mean = !no.constant, fixed = fixed, trans = trans, 
+                              optim.control = list(trace = trc, REPORT = 1, reltol = tol))
+  }
+  if (!is.null(xreg)) {
+    fitit = stats::arima(xdata, order = c(p, d, q), seasonal = list(order = c(P, 
+                                                                              D, Q), period = S), xreg = xreg, fixed = fixed, trans = trans, 
+                         optim.control = list(trace = trc, REPORT = 1, reltol = tol))
+  }
+  if (details) {
+    old.par <- par(no.readonly = TRUE)
+    layout(matrix(c(1, 2, 4, 1, 3, 5), ncol = 2))
+    par(mar = c(2.2, 2, 1, 0.25) + 0.5, mgp = c(1.6, 0.6, 
+                                                0))
+    
+    ## Standardized residuals
+    
+    rs <- fitit$residuals
+    stdres <- rs/sqrt(fitit$sigma2)
+    num <- sum(!is.na(rs))
+    plot.ts(stdres, main = "Standardized Residuals", ylab = "")
+    if (Model) {
+      if (S < 0) {
+        title(paste("Model: (", p, ",", d, ",", q, ")", 
+                    sep = ""), adj = 0)
+      }
+      else {
+        title(paste("Model: (", p, ",", d, ",", q, ") ", 
+                    "(", P, ",", D, ",", Q, ") [", S, "]", sep = ""), 
+              adj = 0)
+      }
+    }
+    
+    ## ACF
+    
+    alag <- max(10 + sqrt(num), 3 * S, max.lag)
+    ACF = stats::acf(rs, alag, plot = FALSE, na.action = na.pass)$acf[-1]
+    LAG = 1:alag/frequency(xdata)
+    L = 2/sqrt(num)
+    plot(LAG, ACF, type = "h"
+         , ylim = c(min(ACF) - 0.1, min(1,  max(ACF + 0.4)))
+         , main = "ACF of Residuals")
+    abline(h = c(0, -L, L), lty = c(1, 2, 2), col = c(1,4, 4))
+    
+    ## Q-Q Plot
+    
+    stats::qqnorm(stdres, main = "Normal Q-Q Plot of Std Residuals")
+    sR <- !is.na(stdres)
+    ord <- order(stdres[sR])
+    ord.stdres <- stdres[sR][ord]
+    PP <- stats::ppoints(num)
+    z <- stats::qnorm(PP)
+    y <- stats::quantile(ord.stdres, c(0.25, 0.75), names = FALSE, 
+                         type = 7, na.rm = TRUE)
+    x <- stats::qnorm(c(0.25, 0.75))
+    b <- diff(y)/diff(x)
+    a <- y[1L] - b * x[1L]
+    abline(a, b, col = 4)
+    SE <- (b/dnorm(z)) * sqrt(PP * (1 - PP)/num)
+    qqfit <- a + b * z
+    U <- qqfit + 3.9 * SE
+    L <- qqfit - 3.9 * SE
+    z[1] = z[1] - 0.1
+    z[length(z)] = z[length(z)] + 0.1
+    xx <- c(z, rev(z))
+    yy <- c(L, rev(U))
+    polygon(xx, yy, border = NA, col = gray(0.6, alpha = 0.2))
+    
+    
+    ## PACF
+    
+    alag <- max(10 + sqrt(num), 3 * S, max.lag)
+    PACF = stats::pacf(rs, alag, plot = FALSE, na.action = na.pass)$acf
+    LAG = 1:alag/frequency(xdata)
+    L = 2/sqrt(num)
+    plot(LAG, PACF, type = "h", ylim = c(min(PACF) - 0.1, min(1,max(PACF + 0.4))), 
+         main = "PACF of Residuals")
+    abline(h = c(0, -L, L), lty = c(1, 2, 2), col = c(1,4, 4))
+    
+    
+    ##?
+    
+    nlag <- ifelse(S < 7, 20, 3 * S)
+    ppq <- p + q + P + Q - sum(!is.na(fixed))
+    if (nlag < ppq + 8) {
+      nlag = ppq + 8
+    }
+    pval <- numeric(nlag)
+    for (i in (ppq + 1):nlag) {
+      u <- stats::Box.test(rs, i, type = "Ljung-Box")$statistic
+      pval[i] <- stats::pchisq(u, i - ppq, lower.tail = FALSE)
+    }
+    plot((ppq + 1):nlag, pval[(ppq + 1):nlag], xlab = "LAG (H)", 
+         ylab = "p value", ylim = c(-0.1, 1), main = "p values for Ljung-Box statistic")
+    abline(h = 0.05, lty = 2, col = "blue")
+    on.exit(par(old.par))
+  }
+  if (is.null(fixed)) {
+    coefs = fitit$coef
+  }
+  else {
+    coefs = fitit$coef[is.na(fixed)]
+  }
+  dfree = fitit$nobs - length(coefs)
+  t.value = coefs/sqrt(diag(fitit$var.coef))
+  p.two = stats::pf(t.value^2, df1 = 1, df2 = dfree, lower.tail = FALSE)
+  ttable = cbind(Estimate = coefs, SE = sqrt(diag(fitit$var.coef)), 
+                 t.value, p.value = p.two)
+  ttable = round(ttable, 4)
+  k = length(coefs)
+  n = n - (d + D)
+  BIC = stats::BIC(fitit)/n
+  AIC = stats::AIC(fitit)/n
+  AICc = (n * AIC + ((2 * k^2 + 2 * k)/(n - k - 1)))/n
+  list(fit = fitit, degrees_of_freedom = dfree, ttable = ttable, 
+       AIC = AIC, AICc = AICc, BIC = BIC)
+}
+```
+
+# Executive Summary
+
+Lots-of-stuff Incorporated's (LOSI) success in producing various consumer goods, including paper, pens and water bottles has allowed its stock price to, on average, perform well since 2016. However, recent events in 2020, particularly the COVID-19 pandemic, have increased business uncertainty and turmoil for the company at large. While the company has rebounded significantly, investors are concerned that over-anticipation for escaping 2020 will force the stock price down slightly over the next 10 days of 2021. A parametric model with ARMA(3,2)x(1,0)[5] noise was calculated to fit the data best, and further predicts that investors concerns are correct and the stock price will continue to trend down, on average, for the next 10 days of 2021.
+
+# Exploratory Data Analysis
+
+```{r}
+LOSI <- read.csv("/Users/noahkaminer/Documents/Stat 153/Final Project/data_stock.csv")
+LOSI$year = format(as.Date(LOSI$Date, tryFormats = "%Y-%m-%d"), "%Y")
+LOSI$month = format(as.Date(LOSI$Date, tryFormats = "%Y-%m-%d"), "%m")
+LOSI$day = format(as.Date(LOSI$Date, tryFormats = "%Y-%m-%d"), "%d")
+LOSI$weekday = weekdays(as.Date(LOSI$Date, tryFormats = "%Y-%m-%d"))
+LOSI$X = 1:nrow(LOSI)
+LOSI$eighteen = 1 - 1*(LOSI$year == "2018")
+LOSI$correction = 1 - 1*(LOSI$month %in% c("11", "12", "1", "2", "3"))
+LOSI$gain = 1 - 1*(LOSI$year == "2017" & LOSI$month %in% c("9", "10", "11", "12"))
+```
+
+The price of one share of LOSI stock has increased, on average from 2016 to 2021, which is displayed by the upward trend in Figure \ref{fig:EDA}. Nonetheless, the stock price has fluctuated significantly within this timeframe. The time series also suggests some degree of seasonality within the data, specifically with a period of 1 year, which is approximately 253 days of trading for the NYSE and NASDAQ. This seasonality is approximately seen through the successive dips in the stock price following the start to each year. The strength of this seasonality will be evaluated in the following sections to determine if investors are right to be concerned with a consistent stock price below the 97 dollar mark for the next 10 days of 2021. Figure \ref{fig:EDA} also appears to suggest heteroskedasticity, considering the progressive increase in fluctuations in the stock price over time. In essence, the observed presence of an upward trend, annual and weekly seasonality and heteroskedasticity indicate the dataset's deviation from stationarity, and importance of modeling these features to better evaluate and forecast the data. It is important to note that 2016 and 2020 was a leap year, which will complicate modeling methods, and will thus be overlooked for the purpose of this analysis.
+
+```{r EDA, fig.cap="A time series of Lots-of-stuff Incorporated's (LOSI) stock price, 1/4/2016 - 1/8/2021.", fig.height = 4, fig.width=8, out.width = "90%", fig.align = 'center'}
+plot.price = function(timeseries,main="",ylab='Stock Price (USD)',x= LOSI$X,type='l',col=1){
+   plot(x,timeseries
+     ,type = type
+     ,xlab = "Year"
+     ,col = col
+     ,ylab = ylab
+     ,main = main
+     ,axes = F
+     )
+        box()
+        axis(2)
+        axis(1,at = c(1,253,504,755,1007,1260), labels = c("'16","'17","'18","'19","'20","'21"))
+}
+
+plot.price(timeseries = LOSI$Price, main="LOSI Stock Price")
+```
+
+# Models Considered
+
+To fully evaluate the signal in the stock price data, two different approaches will be used: a parametric signal model and a differencing model. Each model will fit the signal, but will also be complemented with an ARMA model for the residual noise after accounting for the signal.
+
+## Parametric Signal Model
+
+To begin, a parametric model is employed to model the signal in the data. Exploratory data analysis suggests that the data increases over time and that there may be some degree of annual and weekly seasonality within the data. Thus, it follows to create a sinusoid that increases with time and has a period of 253. Accordingly, an indicator for the day of the week was used because it has long been expected that a stock moves differently on different days of the week. There is also an indicator variable for 2018 in this model because cursory analysis of the stock price time series displays that 2018 does not appear to fit perfectly into the rest of the time series -- though the reasoning is unknown. While the deterministic model described above appears to model the stock trend relatively well and helps to make the residuals more stationary, it certainly is not perfect.
+
+$$ Price_t = \beta_0 + \beta_1t + \sum_{j=1}^4 \beta_{1+j}I_{\text{weekday}_{jt}} + \beta_6I_{\text{2018}_{t}} + \sum_{i=1}^{6}\beta_{6+i}\sin(\frac{2{\pi}it}{253}) + \sum_{i=1}^{6}\beta_{12+i}\cos(\frac{2{\pi}it}{253}) + X_t$$
+
+Figure \ref{fig:model1} illustrates the parametric signal model discussed above. As shown in the left panel, the deterministic model appears to fit the stock price time series relatively well. However, taking a closer look at the right panel of Figure \ref{fig:model1} indicates that the variance of the data, even after a parametric fit, changes over time, and thus the data is still slightly heteroskedastic. Nonetheless, this model offers an interesting and valuable analysis of the signal component to the LOSI stock price time series.
+
+```{r model1, fig.cap="Parametric model for LOSI stock price signal. The left panel displays the model's fitted values in red and the stock price data in black. The right panel illustrates the residuals of this signal model.",  fig.align = 'center', fig.show="hold", fig.height = 4, fig.width=8, out.width = "90%"}
+time = 1:length(LOSI$X)
+
+d=253
+#p_model = lm(Price ~ X + weekday + sin1 + sin2 + sin3 + sin4 + sin5 + sin6 
+             #+ cos1 + cos2 + cos3 + cos4 + cos5 + cos6, data = LOSI)
+p.model = lm(Price ~ X + weekday + eighteen
+             + cos(2*pi*X*1/d) + cos(2*pi*X*2/d)
+             + cos(2*pi*X*3/d) + cos(2*pi*X*4/d)
+             + cos(2*pi*X*5/d) + cos(2*pi*X*6/d)
+             + sin(2*pi*X*1/d) + sin(2*pi*X*2/d)
+             + sin(2*pi*X*3/d) + sin(2*pi*X*4/d)
+             + sin(2*pi*X*5/d) + sin(2*pi*X*6/d)
+             ,data=LOSI)
+par(mfrow = c(1,2))
+plot.price(timeseries = LOSI$Price, main="Parametric Model")
+lines(LOSI$X, p.model$fitted.values, lwd=2, col='red')
+plot.price(p.model$residuals, main="Residuals")
+
+```
+
+### Parametric Signal with ARMA(3,2)x(1,0)[5]
+
+The ACF and PACF plots for the parametric signal model's residuals are displayed in Figure \ref{fig:acf1}. Comparing the ACF and PACF plots, it is quite apparent that there are much more significant lags on the ACF than the PACF. Moreover, the most significant values on the ACF are at lags of 1 and 2. This lends to the interpretation that possible parameters are p=2 and P=1. However, a closer look at the ACF and PACF plots, particularly their shapes suggest that q may also be non-zero. After trial and error, a ARMA(3,2)x(1,0)[5] depicted the best fit to the model. The red circles on Figure \ref{fig:acf1} display this model's fit to the sample autocorrelations.
+
+```{r results='hide', include="false"}
+s1.1 = sarima_wPACF(p.model$residuals,p=3,d=0,q=2,S=5,P=1,Q=0,max.lag = 50)
+```
+
+### Parametric Signal with ARMA(1,3)x(0,2)[5]
+
+The auto.arima() function in R predicted that a ARMA(1,3)x(0,2)[5] model would be a good fit to the data. While somewhat different from the first ARMA model used and discussed above, it seems reasonable that this model could fit the data quite well. The results of this model are displayed by the blue dots on Figure \ref{fig:acf1}, and as shown on the ACF and PACF plots, this model actually appears to fit the model less well than the first ARMA model displayed in red, despite being produced from an R function.
+
+```{r results='hide'}
+auto.arima(ts(p.model$residuals,frequency = 5),max.d=0,max.D=0)
+```
+```{r results='hide', include='false'}
+s1.2 <- sarima_wPACF(p.model$residuals,p=1,d=0,q=3,S=5,Q=2)
+```
+
+```{r acf1, fig.cap="Autocorrelation Function (ACF) and Partial Autocorrelation Function (PACF) values for the parametric signal model's residuals. Red circles illustrate the ARMA(3,2)x(1,0)[5] model and the blue circles display the ARMA(1,3)x(0,2)[5] model.",  fig.align = 'center', fig.show="hold",  fig.height = 4, fig.width=8, out.width = "90%"}
+par(mfrow=c(1,2))
+lag.max = 40
+ACF = acf(p.model$residuals,lag.max = lag.max,plot = FALSE)$acf[-1]
+PACF = pacf(p.model$residuals,lag.max = lag.max,plot = FALSE)$acf
+ylim = range(c(ACF,PACF))
+Lag = 1:lag.max
+L = 2/sqrt(length(p.model$residuals))
+
+## ACF 
+    plot(Lag, ACF, type = "h"
+         , ylim = ylim
+         , main = "ACF of Residuals")
+    abline(h = c(0, -L, L), lty = c(1, 2, 2), col = c(1,4, 4))
+    # noise 1
+    # a = ARMAacf(ar=c(s1.1$fit$coef[1],rep(0,5),s1.1$fit$coef[2],-s1.1$fit$coef[1]*s1.1$fit$coef[2] ),lag.max = lag.max)
+    a = ARMAacf(ma = s1.1$fit$coef[4:5],ar=c(s1.1$fit$coef[1:3],0,s1.1$fit$coef[6],-s1.1$fit$coef[1:3]*s1.1$fit$coef[6]),lag.max = lag.max)
+    points(Lag,a[-1],col='red',cex=.5)
+    # noise 2
+    a = ARMAacf(ar=s1.2$fit$coef[1],ma=c(s1.2$fit$coef[2:4],0, s1.2$fit$coef[5],s1.2$fit$coef[2:4]*s1.2$fit$coef[5],0, s1.2$fit$coef[6], -s1.2$fit$coef[2:4]*s1.2$fit$coef[6]),lag.max = lag.max)
+    points(Lag,a[-1],col='blue',cex=.5)
+## PACF
+    plot(Lag, PACF, type = "h"
+         , ylim = ylim
+         , main = "PACF of Residuals")
+    abline(h = c(0, -L, L), lty = c(1, 2, 2), col = c(1,4, 4))
+    # noise 1
+    p = ARMAacf(ma = s1.1$fit$coef[4:5],ar=c(s1.1$fit$coef[1:3],0,s1.1$fit$coef[6],-s1.1$fit$coef[1:3]*s1.1$fit$coef[6]),lag.max = lag.max,pacf=TRUE)
+    points(Lag,p,col='red',cex=.5)
+    # noise 2
+    p = ARMAacf(ar=s1.2$fit$coef[1],ma=c(s1.2$fit$coef[2:4],0, s1.2$fit$coef[5],s1.2$fit$coef[2:4]*s1.2$fit$coef[5],0, s1.2$fit$coef[6], -s1.2$fit$coef[2:4]*s1.2$fit$coef[6]),lag.max = lag.max, pacf=TRUE)
+    points(Lag,p,col='blue',cex=.5)
+```
+
+## Annual and Weekly Differencing
+
+As discussed in the beginning sections, there appears to be yearly seasonality within the time series data. More specifically, the stock price appears to increase at the end of each year, and dip slightly at the beginning of each year. Given this predicted seasonality and the fact that the stock market is open 253 days a year, differencing with a lag of 253 makes the most sense. Moreover, the stock market is also only open on weekdays, and it is expected that the day of the week has some degree of impact on the stock price. Thus, a subsequent lag of 5 will help in this analysis. This twice-differenced result will account for any linear and quadratic trend that may exist. As Professor Fisher mentioned in lecture, it is sufficient to ignore the increase in variance in 2020 data for simplicity. Ignoring the aforementioned heteroskedasticity in 2020 produces the conclusion that Figure \ref{fig:model2} appears to illustrate weak stationarity. 
+
+```{r model2, fig.cap='Diagnostics for twice-differenced signal model, which illustrates the actual difference to evaluate the stationarity through both an annual and weekly difference. The left panel displays the actual stock price data in black and the fitted values in red. The right panel shows the differences to help evalaute stationarity.',  fig.align = 'center',  fig.height = 4, fig.width=8, out.width = "90%"}
+par(mfrow=c(1,2))
+
+s.diff = diff(diff(LOSI$Price,253),5)
+LOSI$impliedmodel = NA
+for(i in 259:nrow(LOSI)){
+        LOSI$impliedmodel[i] = mean(s.diff) + LOSI$Price[i-5] + LOSI$Price[i-253] - LOSI$Price[i-253-5]
+}
+#
+plot.price(LOSI$Price[(nrow(LOSI)-length(s.diff)+1):nrow(LOSI)],x=LOSI$X[(nrow(LOSI)-length(s.diff)+1):nrow(LOSI)],main="Differencing Fitted Values")
+lines(LOSI$X,LOSI$impliedmodel,col='red',lwd=1)
+#
+plot.price(s.diff
+           ,main=expression(paste(nabla[5],nabla[253],"Stock Price"[t]))
+           ,x=LOSI$X[(nrow(LOSI)-length(s.diff)+1):nrow(LOSI)])
+```
+
+### Seasonal and Weekly Differencing with ARMA(3,2)x(1,0)[5]
+
+The sample ACF and PACF of the differenced data is shown in Figure \ref{fig:acf2}. The ACF appears to display a pattern similar to that of an AR model with p=3, but with some variations at later lags. Moreover, the ACF seems to indicate that P is not 0, so a value of 1 was used. As for the PACF, there appears to large value every 5 lags, so S=5. The aforementioned ARMA(3,2)x(1,0)[5] model is displayed with red circles on Figure \ref{fig:acf2}, which appears to illustrate a relatively good fit to the data. 
+
+```{r s21, results='hide', fig.cap='Diagnostic plots for ARMA(3,2)x(1,0)[5].', out.width = "80%", fig.align = 'center', include=FALSE}
+s2.1 = sarima_wPACF(s.diff,p=3,d=0,q=2,P=1,D=0,Q=0,S=5,max.lag=30)
+```
+
+### Seasonal and Weekly Differencing with ARMA(2,2)x(2,0)[5]
+
+To keep consistency with the Parametric Signal Model used previously, the differencing model's second ARMA noise model employed utilized the auto.arima() function in R. This function recommends ARM(2,2),(2,0)[5], thus suggesting paramters: p=2, q=2, P=2, Q=2, and S=5. Clearly this model is very similar to the first noise model used, but simply with different values of p and P. This suggested model from the auto.arima() function is displayed on Figure \ref{fig:acf2} with blue circles. This noise model appears to be a good fit to the data, but by eyeballing it, it seems to have a worse fit than the first noise model used for the differencing approach. However, this comparison will be analyzed further in the following section.
+
+```{r results='hide'}
+auto.arima(ts(s.diff,frequency=5))
+```
+```{r results='hide', include='false'}
+s2.2 = sarima(s.diff,p=2,d=0,q=2,S=5,P=2,D=0,Q=0)
+```
+
+```{r acf2, fig.cap="Autocorrelation Function (ACF) and Partial Autocorrelation Function (PACF) values for the seasonal differencing model.  Red circles display the ARMA(3,2)x(1,0)[5] model, while the blue circles illustrate the ARMA(2,2)x(2,0)[5].",  fig.align = 'center', fig.show="hold",  fig.height = 4, fig.width=8, out.width = "90%"}
+par(mfrow=c(1,2))
+lag.max = 40
+ACF = acf(s.diff,lag.max = lag.max,plot = FALSE)$acf[-1]
+PACF = pacf(s.diff,lag.max = lag.max,plot = FALSE)$acf
+ylim = c(-.2,1)
+Lag = 1:lag.max
+L = 2/sqrt(length(nrow(LOSI)-length(s.diff)+1))
+
+## ACF
+    plot(Lag, ACF, type = "h"
+         , ylim = ylim
+         , main = "ACF of Residuals")
+    abline(h = c(0, -L, L), lty = c(1, 2, 2), col = c(1,4, 4))
+    # noise 1
+    a = ARMAacf(ma=s2.1$fit$coef[4:5], ar=c(s2.1$fit$coef[1:3],0,s2.1$fit$coef[6],-s2.1$fit$coef[6]*s2.1$fit$coef[1:3]),lag.max = lag.max)
+    points(Lag,a[-1],col='red',cex=.5)
+    # noise 2
+    a = ARMAacf(ma=s1.2$fit$coef[3:4],ar=c(s1.2$fit$coef[1:2],rep(0,2), s1.2$fit$coef[5],s1.2$fit$coef[1:2]*s1.2$fit$coef[5],rep(0,2),s1.2$fit$coef[6], -s1.2$fit$coef[1:2]*s1.2$fit$coef[6]),lag.max = lag.max)
+    points(Lag,a[-1],col='blue',cex=.5)
+## PACF
+    plot(Lag, PACF, type = "h"
+         , ylim = ylim
+         , main = "PACF of Residuals")
+    abline(h = c(0, -L, L), lty = c(1, 2, 2), col = c(1,4, 4))
+    # noise 1
+    p = a = ARMAacf(ma=s2.1$fit$coef[4:5], ar=c(s2.1$fit$coef[1:3],0,s2.1$fit$coef[6],-s2.1$fit$coef[6]*s2.1$fit$coef[1:3]),lag.max = lag.max,pacf = TRUE)
+    points(Lag,p,col='red',cex=.5)
+    # noise 2
+    p = ARMAacf(ma=s1.2$fit$coef[3:4],ar=c(s1.2$fit$coef[1:2],rep(0,2), s1.2$fit$coef[5],s1.2$fit$coef[1:2]*s1.2$fit$coef[5],rep(0,2),s1.2$fit$coef[6], -s1.2$fit$coef[1:2]*s1.2$fit$coef[6]),lag.max = lag.max,pacf = TRUE)
+    points(Lag,p,col='blue',cex=.5)
+
+```     
+
+# Model Comparison and Selection
+
+Table \@ref(tab:rmsetable) displays the results of comparing the four aforementioned models using time series cross validation. The test sets utilize the last 180 days of the data, on a rolling basis, in 10 day increments. This produces 180 predicted values, or forecasted data points, over the 10 day windows previously discussed. To compare the results of each model's forecasted data points, the root-mean squared prediction error (RMSPE) will be calculated for each model. The model of best fit will the be chosen out of the four models tested, based on the lowest RMSPE and that model will ultimately be used to predict the next 10 days of 2021.
+
+Table \@ref(tab:rmsetable) clearly illustrates that the Parametric Model with ARMA(3,2)x(1,0)[5] noise produces the lowest RMSPE among all of the models tested. While all four models have very similar RMSPE, the following sections will employ the Parametric Model with ARMA(3,2)x(1,0)[5] noise to predict the next 10 days of 2021.
+
+```{r include="false"}
+sse <- c(model1.1=0, model1.2=0, model2.1=0, model2.2=0)
+for (i in 18:1) { #18:1
+  train.set <- LOSI[1:(nrow(LOSI) - 10*i),]
+  test.set <- LOSI[(nrow(LOSI) - 10*i + 1):(nrow(LOSI) - 10*(i-1) ),]
+  N = nrow(train.set)
+  # Signal model 1
+  signal1 = lm(Price ~ X + weekday + eighteen
+             + cos(2*pi*X*1/d) + cos(2*pi*X*2/d)
+             + cos(2*pi*X*3/d) + cos(2*pi*X*4/d)
+             + cos(2*pi*X*5/d) + cos(2*pi*X*6/d)
+             + sin(2*pi*X*1/d) + sin(2*pi*X*2/d)
+             + sin(2*pi*X*3/d) + sin(2*pi*X*4/d)
+             + sin(2*pi*X*5/d) + sin(2*pi*X*6/d)
+             ,data=train.set)
+  signal.forecast1 = predict(signal1,test.set)
+  noise.forecast1.1 = sarima.for(signal1$residuals, n.ahead=10, p=1,d=0,q=1,S=7,P=1)$pred
+  noise.forecast1.2 = sarima.for(signal1$residuals, n.ahead=10, p=2,d=0,q=2)$pred
+  forecast1.1 = signal.forecast1 + noise.forecast1.1
+  forecast1.2 = signal.forecast1 + noise.forecast1.2
+
+  # Signal model 2 - Differencing
+  noise.forecast2.1 = sarima.for(s.diff,n.ahead=10,p=3,d=0,q=2,P=1,D=0,Q=0,S=5)$pred
+  noise.forecast2.2 = sarima.for(s.diff,n.ahead=10,p=2,d=0,q=2,S=5,Q=1)$pred
+
+  forecast2.1 = numeric(10)
+  forecast2.2 = numeric(10)
+  # These equation are specific for the lag-7 differencing, as the first few forecasts must become the Y_{i-7} values for i in 8:10. 
+  for(i in 1:5){
+          forecast2.1[i] = noise.forecast2.1[i] + train.set$Price[N+i-5]
+                                + train.set$Price[N+i-253] - train.set$Price[N+i-253-5]
+          forecast2.2[i] = noise.forecast2.2[i] + train.set$Price[N+i-5]
+                                + train.set$Price[N+i-253] - train.set$Price[N+i-253-5]
+  }
+  for(i in 6:10){
+          forecast2.1[i] = noise.forecast2.1[i] + forecast2.1[i-5] #this is hat(Y)_[N+i-7]
+                                + train.set$Price[N+i-253] - train.set$Price[N+i-253-5]
+          forecast2.2[i] = noise.forecast2.2[i] + forecast2.2[i-5] #this is hat(Y)_[N+i-7]
+                                + train.set$Price[N+i-253] - train.set$Price[N+i-253-5]
+  }
+
+  #
+  sse[1] = sse[1] + sum((forecast1.1 - test.set$Price)^2)
+  sse[2] = sse[2] + sum((forecast1.2 - test.set$Price)^2)
+  sse[3] = sse[3] + sum((forecast2.1 - test.set$Price)^2)
+  sse[4] = sse[4] + sum((forecast2.2 - test.set$Price)^2)
+}
+```
+
+```{r rmsetable}
+#RMSE table
+rmse = matrix(sqrt(sse/180), nrow=4,ncol = 1)
+colnames(rmse) = "RMSPE"
+rownames(rmse) = c(
+        "Parametric Model + ARMA(3,2)x(1,0)[5]",
+        "Parametric Model + ARMA(1,3)x(0,2)[5]",
+        "Annual Differencing + Weekly Differencing + ARMA(3,2)x(1,0)[5]",
+        "Annual Differencing + Weekly Differencing + ARMA(2,2)x(2,0)[5]"
+        )
+knitr::kable(rmse,caption = "Cross-Validated Out-of-Sample Root-Mean Squared Prediction Error for the Four Models Under Consideration.")
+```
+
+# Results
+
+Per the request and concern of the LOSI's Board of Directors, the model with the lowest RMSPE will be used to predict the next 10 days of LOSI stock price. This model was a parametric model with ARMA(3,2)x(1,0)[5] noise. Let $Price_t$ denote LOSI stock price on day $t$ with a noise term $X_t$. The parametric model with the best fit is shown again below. The addition to the equation below assumes stationarity via the ARMA(3,2)x(1,0)[5] noise model, given that $W_t$ is white noise with a variance $\sigma^2_W$.
+
+$$ Price_t = \beta_0 + \beta_1t + \sum_{j=1}^4 \beta_{1+j}I_{\text{weekday}_{jt}} + \beta_6I_{\text{2018}_{t}} + \sum_{i=1}^{6}\beta_{6+i}\sin(\frac{2{\pi}it}{253}) + \sum_{i=1}^{6}\beta_{12+i}\cos(\frac{2{\pi}it}{253}) + X_t$$
+$$ X_t = \sum_{i=1}^3 \phi_i X_{t-i} + \Phi X_{t-5} - \sum_{i=1}^3 \phi_i X_{t-i} \Phi X_{t-6} + W_t + \sum_{j=1}^2 \theta_j W_{t-j}$$
+
+The model contains a number of binary indicators to improve the given model. Specifically, $I_{\text{weekday}_{jt}}$ indicates if day t is the jth day of the week. Moreover, $I_{2018}$ indicates if day t is in 2018. $\phi$, $\Phi$, $\theta$ and each of the $\beta$s are coefficients estimated in the following section of the time series analysis. While it is typically assumed that a linear model employs X with a mean of 0, the function written to create and analyze the models in this paper, notably referred to as "SARIMA", more accurately estimates the mean of X in this model to be 0.1237818.
+
+## Estimation of Model Parameters
+
+The estimates of the model parameters are illustrated in Table 2 in Appendix 1. For the weekday indicator variables, it is important to understand that Friday is used as the base day of the week (the day of the week that all other days are compared to). From this, it is interesting to point out that Friday has a significantly larger impact on stock price than any other day of the week.
+
+```{r}
+signal.final = lm(Price ~ X + weekday + eighteen
+             + cos(2*pi*X*1/d) + cos(2*pi*X*2/d)
+             + cos(2*pi*X*3/d) + cos(2*pi*X*4/d)
+             + cos(2*pi*X*5/d) + cos(2*pi*X*6/d)
+             + sin(2*pi*X*1/d) + sin(2*pi*X*2/d)
+             + sin(2*pi*X*3/d) + sin(2*pi*X*4/d)
+             + sin(2*pi*X*5/d) + sin(2*pi*X*6/d)
+             ,data=LOSI)
+s = summary(signal.final)
+```
+
+## Prediction
+
+Figure \ref{fig:forecasts} displays the forecasted values of LOSI's stock price for the next 10 days in January 2021. More specifically, the forecasted dates are 1/11/21 - 1/15/21 and  1/18/21 - 1/22/21. The model predicts that the stock price will continue to decrease, on average, over the next 10 days and hover around a share price of \$96. Unfortunately, LOSI's board of directors and investors are rightfully concerned that the share price will stay below \$97/share. However, when analyzing these predictions, it is important for the board of directors to keep in mind that there is certainly a margin of error and the stock price could very well increase over the next 10 days.
+
+```{r forecasts, fig.cap='Forecasts of LOSI Stock Price. The black line indicates recent historical stock price data, beginning on 11/8/20. The red line indicates the forecasts for the next ten weekdays in Janaury 2021.',  fig.align = 'center', fig.show="hold",  fig.height = 4, fig.width=8, out.width = "90%"}
+#  
+LOSI2 = tail(LOSI,10)[,c(1,7,8,9)]
+LOSI2$X = LOSI2$X + 10
+LOSI2$weekday = LOSI$weekday[1:10]
+signal.forecast.final = predict(signal.final,LOSI2)
+
+# !!! The most accurate way to calculate the forecast
+noise.forecast.final = sarima.for(signal.final$residuals, n.ahead=10, p=3,d=0,q=2,S=5,P=1,plot=FALSE)$pred
+forecast.final = signal.forecast.final + noise.forecast.final
+
+plot(x=LOSI$X[1160:nrow(LOSI)],y=LOSI$Price[1160:nrow(LOSI)],main="LOSI Stock Price with Forecasts",xlim = c(1160,1280),type='l',xlab = 'Date', ylab="Stock Price (USD)",xaxt='n')
+axis(1, at = c(1160,1180,1200,1220,1240,1260,1280), labels = c('11/8/20','9/9/20','10/7/20','11/4/20','12/3/20','1/4/21','2/1/21'))
+points(x=LOSI$X[1160:nrow(LOSI)],y=LOSI$Price[1160:nrow(LOSI)],lw=1)
+lines(forecast.final,col='red',lw=1)
+points(forecast.final,col='red',lw=1)
+
+write.table(x = forecast1.1,file = "~/Desktop/sales_1234567.csv", sep=",",row.names=FALSE,  col.names=FALSE)
+```
+
+
+
+
+
+\newpage
+# Appendix 1 - Table of Parameter Estimates
+
+Table 2: Estimates of the forecasting model parameters with their standard errors (SE).
+
+|Parameter|Estimate|SE|Coefficient Description|
+|:---------|---:|---:|:---|
+|$\beta_{0}$|40.817|0.312|Intercept|
+|$\beta_{1}$|0.036|0.000|Time|
+|$\beta_{2}$|-0.019|0.289|Monday|
+|$\beta_{3}$|0.034|0.283|Thursday|
+|$\beta_{4}$|0.164|0.283|Tuesday|
+|$\beta_{5}$|0.047|0.283|Wednesday|
+|$\beta_{6}$|-4.776|0.226|2018|
+|$\beta_{7}$|0.289|0.127|$cos(2 * pi * time * 1/253)$|
+|$\beta_{8}$|0.304|0.127|$cos(2 * pi * time * 2/253)$|
+|$\beta_{9}$|0.135|0.127|$cos(2 * pi * time * 3/253)$|
+|$\beta_{10}$|-0.120|0.127|$cos(2 * pi * time * 4/253)$|
+|$\beta_{11}$|-0.491|0.127|$cos(2 * pi * time * 5/253)$|
+|$\beta_{12}$|-0.185|0.127|$cos(2 * pi * time * 6/253)$|
+|$\beta_{13}$|-1.417|0.129|$sin(2 * pi * time * 1/253)$|
+|$\beta_{14}$|-0.108|0.128|$sin(2 * pi * time * 2/253)$|
+|$\beta_{15}$|-0.345|0.127|$sin(2 * pi * time * 3/253)$|
+|$\beta_{16}$|0.154|0.127|$sin(2 * pi * time * 4/253)$|
+|$\beta_{17}$|-0.240|0.127|$sin(2 * pi * time * 5/253)$|
+|$\beta_{18}$|-0.188|0.127|$sin(2 * pi * time * 6/253)$|
+|$\phi_1$|-0.734|.043|AR1 Coefficient|
+|$\phi_2$|0.827|0.018|AR2 Coefficient|
+|$\phi_3$|0.818|0.044|AR3 Coefficient|
+|$\theta_1$|1.546|0.059|MA1 Coefficient|
+|$\theta_2$|0.657|0.065|MA2 Coefficient|
+|$\Phi$|-0.038|0.033|Seasonal AR Coefficient|
+|$\sigma^2_W$|.666| |Variance of White Noise|
+
