@@ -2,6 +2,6 @@
 
 ## Time Series Evaluation of Synthetic Stock Price Data
 
-### UC Berkeley Data 102 Final Project - Fall 2021
+### UC Berkeley Stat 153 (Time Series) Final Project - Spring 2021
 
 #### Contributor: Noah Kaminer
