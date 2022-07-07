@@ -1,2 +1,3 @@
 # stat153-finalproject
-Time Series Evaluation of Synthetic Stock Price Data
+## Time Series Evaluation of Synthetic Stock Price Data
+### Contributor: Noah Kaminer
